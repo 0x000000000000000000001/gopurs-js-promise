@@ -1,0 +1,194 @@
+package Promise_Internal
+
+import (
+	"sync"
+	"unsafe"
+	"gopurs/output/gopurs_runtime"
+)
+
+type PromiseState int
+
+const (
+	Pending PromiseState = iota
+	Resolved
+	Rejected
+)
+
+type Promise struct {
+	state    PromiseState
+	value    gopurs_runtime.Value
+	err      gopurs_runtime.Value
+	handlers []func()
+	mu       sync.Mutex
+}
+
+func New(executorBox gopurs_runtime.Value) gopurs_runtime.Value {
+	executor := *(*func(gopurs_runtime.Value, gopurs_runtime.Value) gopurs_runtime.Value)(unsafe.Pointer(&executorBox.UnsafePtr))
+	p := &Promise{state: Pending}
+	resolve := gopurs_runtime.Func(func(val gopurs_runtime.Value) gopurs_runtime.Value {
+		p.mu.Lock()
+		if p.state == Pending {
+			p.state = Resolved
+			p.value = val
+			handlers := p.handlers
+			p.handlers = nil
+			p.mu.Unlock()
+			for _, h := range handlers {
+				h()
+			}
+		} else {
+			p.mu.Unlock()
+		}
+		return gopurs_runtime.Value{}
+	})
+	reject := gopurs_runtime.Func(func(err gopurs_runtime.Value) gopurs_runtime.Value {
+		p.mu.Lock()
+		if p.state == Pending {
+			p.state = Rejected
+			p.err = err
+			handlers := p.handlers
+			p.handlers = nil
+			p.mu.Unlock()
+			for _, h := range handlers {
+				h()
+			}
+		} else {
+			p.mu.Unlock()
+		}
+		return gopurs_runtime.Value{}
+	})
+	
+	executor(resolve, reject)
+	
+	return gopurs_runtime.Box(p)
+}
+
+func NewPromise() (gopurs_runtime.Value, func(gopurs_runtime.Value), func(gopurs_runtime.Value)) {
+	p := &Promise{state: Pending}
+	resolve := func(val gopurs_runtime.Value) {
+		p.mu.Lock()
+		if p.state == Pending {
+			p.state = Resolved
+			p.value = val
+			handlers := p.handlers
+			p.handlers = nil
+			p.mu.Unlock()
+			for _, h := range handlers {
+				h()
+			}
+		} else {
+			p.mu.Unlock()
+		}
+	}
+	reject := func(err gopurs_runtime.Value) {
+		p.mu.Lock()
+		if p.state == Pending {
+			p.state = Rejected
+			p.err = err
+			handlers := p.handlers
+			p.handlers = nil
+			p.mu.Unlock()
+			for _, h := range handlers {
+				h()
+			}
+		} else {
+			p.mu.Unlock()
+		}
+	}
+	return gopurs_runtime.Box(p), resolve, reject
+}
+
+func Resolve(valBox gopurs_runtime.Value) gopurs_runtime.Value {
+	p := &Promise{state: Resolved, value: valBox}
+	return gopurs_runtime.Box(p)
+}
+
+func Reject(errBox gopurs_runtime.Value) gopurs_runtime.Value {
+	p := &Promise{state: Rejected, err: errBox}
+	return gopurs_runtime.Box(p)
+}
+
+func ThenOrCatch(onResolveBox gopurs_runtime.Value, onRejectBox gopurs_runtime.Value, pBox gopurs_runtime.Value) gopurs_runtime.Value {
+	onResolve := *(*func(gopurs_runtime.Value) gopurs_runtime.Value)(unsafe.Pointer(&onResolveBox.UnsafePtr))
+	onReject := *(*func(gopurs_runtime.Value) gopurs_runtime.Value)(unsafe.Pointer(&onRejectBox.UnsafePtr))
+
+	p := gopurs_runtime.Unbox[*Promise](pBox)
+	
+	nextP := &Promise{state: Pending}
+	
+	handle := func() {
+		var next *Promise
+		var nextBox gopurs_runtime.Value
+		if p.state == Resolved {
+			nextBox = onResolve(p.value)
+		} else {
+			nextBox = onReject(p.err)
+		}
+		
+		next = gopurs_runtime.Unbox[*Promise](nextBox)
+		if next == nil {
+			panic("next is nil!")
+		}
+		
+		next.mu.Lock()
+		if next.state == Resolved {
+			nextP.mu.Lock()
+			nextP.state = Resolved
+			nextP.value = next.value
+			handlers := nextP.handlers
+			nextP.handlers = nil
+			nextP.mu.Unlock()
+			next.mu.Unlock()
+			for _, h := range handlers {
+				h()
+			}
+		} else if next.state == Rejected {
+			nextP.mu.Lock()
+			nextP.state = Rejected
+			nextP.err = next.err
+			handlers := nextP.handlers
+			nextP.handlers = nil
+			nextP.mu.Unlock()
+			next.mu.Unlock()
+			for _, h := range handlers {
+				h()
+			}
+		} else {
+			next.handlers = append(next.handlers, func() {
+				nextP.mu.Lock()
+				var handlers []func()
+				if next.state == Resolved {
+					nextP.state = Resolved
+					nextP.value = next.value
+				} else {
+					nextP.state = Rejected
+					nextP.err = next.err
+				}
+				handlers = nextP.handlers
+				nextP.handlers = nil
+				nextP.mu.Unlock()
+				for _, h := range handlers {
+					h()
+				}
+			})
+			next.mu.Unlock()
+		}
+	}
+	
+	p.mu.Lock()
+	if p.state == Pending {
+		p.handlers = append(p.handlers, handle)
+		p.mu.Unlock()
+	} else {
+		p.mu.Unlock()
+		handle()
+	}
+	
+	return gopurs_runtime.Box(nextP)
+}
+
+func Then_(a gopurs_runtime.Value, b gopurs_runtime.Value) gopurs_runtime.Value { panic("Not implemented") }
+func Catch(a gopurs_runtime.Value, b gopurs_runtime.Value) gopurs_runtime.Value { panic("Not implemented") }
+func Finally(a gopurs_runtime.Value, b gopurs_runtime.Value) gopurs_runtime.Value { panic("Not implemented") }
+func All(a gopurs_runtime.Value) gopurs_runtime.Value { panic("Not implemented") }
+func Race(a gopurs_runtime.Value) gopurs_runtime.Value { panic("Not implemented") }
