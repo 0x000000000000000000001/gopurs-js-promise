@@ -15,7 +15,9 @@
         },
         "test": {
           "dependencies": [
-            "assert"
+            "assert",
+            "maybe",
+            "refs"
           ]
         }
       }
@@ -1028,6 +1030,14 @@
         "newtype",
         "prelude",
         "tuples"
+      ]
+    },
+    "refs": {
+      "type": "local",
+      "path": "../gopurs-refs",
+      "dependencies": [
+        "effect",
+        "prelude"
       ]
     },
     "safe-coerce": {

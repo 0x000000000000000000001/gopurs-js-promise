@@ -11,6 +11,8 @@ package:
     main: Test.Main
     dependencies:
       - assert
+      - refs
+      - maybe
 workspace:
   packageSet:
     registry: 77.7.0
