@@ -8,3 +8,6 @@ package-lock.json
 /node_modules/
 /output/
 /generated-docs/
+.DS_Store
+.spago
+output

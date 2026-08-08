@@ -26,3 +26,5 @@ else
     echo "No output/Test.Main/main found."
     exit 1
 fi
+echo -e "
+✅ Tests passed successfully!"
